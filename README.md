@@ -1,6 +1,6 @@
 # 🔮 Mottled
 
-[![CI](https://github.com/BobGnarly420/marble/actions/workflows/ci.yml/badge.svg)](https://github.com/BobGnarly420/marble/actions/workflows/ci.yml)
+[![CI](https://github.com/BobGnarly420/mottled/actions/workflows/ci.yml/badge.svg)](https://github.com/BobGnarly420/mottled/actions/workflows/ci.yml)
 
 **Interactive latent trajectory explorer for transformer forward passes.**
 
