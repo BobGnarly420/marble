@@ -17,6 +17,12 @@ Prompt → forward pass → capture residual stream after every block
        → animate trajectory → expose semantic neighborhoods
 ```
 
+![The Mottled explorer: an A/B prompt scene on the density terrain, with the
+layer scrubber and the token inspector](docs/images/explorer.png)
+*The Streamlit explorer with an A/B overlay — "The capital of France is" vs
+"The capital of Germany is" — marbles at layer 12, inspector showing the
+final token's predictions and semantic neighbors.*
+
 ## Quickstart
 
 ```bash
@@ -243,6 +249,11 @@ web viewer with any static file server:
 python -m http.server            # from the repo root
 # → http://localhost:8000/viewer/   (drag a .mtj in, or ?file=samples/scene-abc.mtj)
 ```
+
+![The WebGL web viewer rendering the committed three-run sample scene](docs/images/viewer.png)
+*The dependency-free WebGL viewer on `samples/scene-abc.mtj`: three runs on
+one terrain, per-run visibility toggles, the comparison table, and the layer
+scrubber.*
 
 The Streamlit app has an **Export scene (.mtj)** button for whatever is
 currently on screen. The viewer is plain WebGL2 with zero dependencies and
