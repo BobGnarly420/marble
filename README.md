@@ -1,10 +1,10 @@
-# 🔮 MarbleTrace
+# 🔮 Mottled
 
 [![CI](https://github.com/BobGnarly420/marble/actions/workflows/ci.yml/badge.svg)](https://github.com/BobGnarly420/marble/actions/workflows/ci.yml)
 
 **Interactive latent trajectory explorer for transformer forward passes.**
 
-MarbleTrace (formerly MARBLE) visualizes hidden-state evolution as
+Mottled (formerly MARBLE) visualizes hidden-state evolution as
 trajectories over a semantic manifold. It is *not* a neuron inspector,
 feature-attribution tool, or explainability dashboard — it instruments
 **latent dynamics**: how the
