@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mottled — scene viewer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2343aa8b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud-top">
+  <div id="title">Mottled <span class="dim">— latent trajectory scene viewer</span></div>
+  <div id="meta" class="dim"></div>
+  <div id="loadrow">
+    <button id="openBtn">Open .mtj…</button>
+    <input id="fileInput" type="file" accept=".mtj" hidden>
+    <span class="dim hint">or drag a .mtj anywhere</span>
+  </div>
+</div>
+
+<div id="runs-panel" hidden>
+  <div class="panel-head">runs</div>
+  <div id="runs-list"></div>
+  <div id="comparisons"></div>
+  <label id="attn-row" hidden><input type="checkbox" id="attnToggle"> attention flow</label>
+</div>
+
+<div id="info-panel" hidden></div>
+
+<div id="hud-bottom" hidden>
+  <button id="playBtn">&#9654;</button>
+  <select id="speedSel" title="playback speed">
+    <option value="1">0.5×</option>
+    <option value="2" selected>1×</option>
+    <option value="4">2×</option>
+  </select>
+  <span id="layerLabel" class="mono">layer 0</span>
+  <input id="layerSlider" type="range" min="0" max="12" step="0.01" value="0">
+</div>
+
+<div id="overlay" class="center-msg">
+  <div id="overlay-msg">drop a <span class="mono">.mtj</span> scene file to explore</div>
+</div>
+<div id="drop-shade" hidden><div class="center-msg">drop to load</div></div>
+
+<script src="mtj.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
