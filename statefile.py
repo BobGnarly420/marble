@@ -214,6 +214,11 @@ def save_scene(result: dict, path_or_fh) -> None:
         "terrain": {"x": "terrain.x", "y": "terrain.y", "z": "terrain.z"},
         "runs": runs,
     }
+    from narrate import scene_notes
+
+    notes = scene_notes(result)
+    if notes:
+        manifest["notes"] = notes
     if result.get("comparisons"):
         manifest["comparisons"] = [
             {"label": chr(65 + i), "hausdorff": float(c.hausdorff),

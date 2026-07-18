@@ -83,6 +83,12 @@ Fields:
 - `comparisons` *(optional)*: for runs beyond the first, JSON summaries:
   `{ "label", "hausdorff", "dtw_normalized", "shared_tokens", "onset_layer",
      "readout_changed" }`.
+- `notes` *(optional)*: list of short declarative sentences, computed from
+  the scene's own measurements by the producer (see `narrate.py`), that
+  explain what the picture shows — what the terrain is, what the dense
+  region consists of, how to read convergence. Viewers SHOULD surface them;
+  they carry the scene's self-explanation. (Additive field — older readers
+  ignore it, per the stability rules.)
 
 Array names for run `i` are conventionally prefixed `run{i}.` (e.g.
 `run0.points`) but viewers MUST resolve them through the manifest references,

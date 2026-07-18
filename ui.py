@@ -18,6 +18,7 @@ import cache as cache_mod
 import compare as compare_mod
 import density as density_mod
 import metrics as metrics_mod
+import narrate as narrate_mod
 import sae as sae_mod
 import statefile as statefile_mod
 import projection as projection_mod
@@ -697,6 +698,11 @@ def main() -> None:
                 shares = metrics_mod.component_shares(traj, token=token)
                 st.markdown("Share of each block's residual write")
                 st.line_chart({"attention": shares[:, 0], "mlp": shares[:, 1]})
+
+        if notes := narrate_mod.scene_notes(result):
+            with st.expander("Reading this landscape", expanded=False):
+                for note in notes:
+                    st.write(note)
 
         with st.expander("Research metrics", expanded=False):
             summary = metrics_mod.summarize(traj, result["coords"], token=token)

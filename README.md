@@ -147,6 +147,7 @@ density, terrain, metrics, comparison, every viewer) works unchanged.
 | `compare.py` | Trajectory comparison: Hausdorff, dynamic time warping, shared-prefix alignment, layerwise divergence profiles |
 | `sae.py` | Sparse-autoencoder features: apply (never train) an SAE to every captured state; demo dictionary + npz interchange |
 | `statefile.py` | `.mtj` interchange: save/load full StateTrajectories and viewer-ready scene bundles ([format spec](docs/mtj-format.md)) |
+| `narrate.py` | Measurements → declarative scene notes (what the terrain is, what the basin consists of); embedded in `.mtj` scenes |
 | `viewer/` | Self-contained WebGL viewer for `.mtj` scenes — no build step, no dependencies |
 | `serve.py` | Optional stdlib capture backend: serves the viewer + a JSON API so the browser can generate scenes |
 | `cli.py` | `mottled` console commands: explorer (default), `serve`, `export` |
@@ -316,6 +317,21 @@ points (a projection output), never transformer internals — so any substrate
 projected to ≤3-D is pickable. A volumetric (voxel-octree) renderer for
 *fields* (density / flow) will land once we render ensembles rather than single
 runs.
+
+### The design explains itself
+
+Showing a glowing basin without saying what it is invites mysticism, so the
+design language carries its own explanation. `narrate.py` is the narrative
+layer made explicit: it computes short declarative sentences from a scene's
+own measurements — what the terrain is (a density estimate over this
+capture's states, not a property of the model), what the densest region
+consists of (share of states, layer concentration), and how to read
+convergence (entropy drop, flagged as an interpretation). The sentences
+travel inside `.mtj` scene files (`notes`), the web viewer surfaces them in
+a Reading panel alongside a color-by-depth mode and a terrain-composition
+hover ("what is this attractor made of"), and the Streamlit inspector shows
+them under **Reading this landscape**. No claim ships without the
+measurement that supports it.
 
 ### Design language
 
