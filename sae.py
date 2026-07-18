@@ -160,3 +160,62 @@ def active_features(acts: np.ndarray, k: int = 20) -> np.ndarray:
     peak = np.asarray(acts).max(axis=(0, 1))
     order = np.argsort(-peak)[:k]
     return order[peak[order] > 0]
+
+
+# ------------------------------------------------------------ feature field
+@dataclass
+class FeatureField:
+    """The SAE evaluated over the projection plane itself.
+
+    The domain-coloring analogue: where a complex-plane plot evaluates f(z)
+    at every point of the plane and shows arg(f) as hue and |f| as
+    brightness, this evaluates the SAE at every grid point of the projected
+    manifold — `dominant` (which feature decodes strongest) plays the role
+    of the phase, `magnitude` (its activation) the modulus.
+    """
+
+    grid_x: np.ndarray      # (W,)
+    grid_y: np.ndarray      # (H,)
+    magnitude: np.ndarray   # (H, W) strongest activation at each plane point
+    dominant: np.ndarray    # (H, W) id of the strongest feature; -1 where none fires
+    n_active: np.ndarray    # (H, W) how many features fire at each point
+
+    @property
+    def features(self) -> np.ndarray:
+        """Sorted ids of every feature that dominates somewhere."""
+        ids = np.unique(self.dominant)
+        return ids[ids >= 0]
+
+
+def feature_field(sae: SAE, projector, grid_x: np.ndarray, grid_y: np.ndarray) -> FeatureField:
+    """Evaluate `sae` over a grid on the projection plane: the domain coloring.
+
+    Each (x, y) grid point is inverse-projected back to hidden space and
+    encoded; the field records, per point, the strongest feature and its
+    activation.  Requires an invertible projector (PCA is exact — grid
+    points map onto the fitted affine 2-plane in hidden space, so the field
+    shows what the SAE dictionary sees *along the plane you are looking
+    at*; UMAP's inverse is approximate).
+    """
+    if not hasattr(projector, "inverse_transform"):
+        raise ValueError(
+            f"projection {type(projector).__name__} has no inverse_transform; "
+            "the feature field needs plane -> hidden-space inversion (use pca)")
+    gx, gy = np.meshgrid(np.asarray(grid_x), np.asarray(grid_y))
+    plane = np.column_stack([gx.ravel(), gy.ravel()])
+    hidden = np.asarray(projector.inverse_transform(plane))
+    if hidden.shape[-1] != sae.dim:
+        raise ValueError(f"projector inverts to dim {hidden.shape[-1]}, SAE dim is {sae.dim}")
+
+    acts = sae.encode(hidden)                      # (H*W, F)
+    magnitude = acts.max(axis=-1)
+    dominant = acts.argmax(axis=-1).astype(np.int32)
+    dominant[magnitude <= 0] = -1
+    shape = gx.shape
+    return FeatureField(
+        grid_x=np.asarray(grid_x, dtype=np.float32),
+        grid_y=np.asarray(grid_y, dtype=np.float32),
+        magnitude=magnitude.reshape(shape).astype(np.float32),
+        dominant=dominant.reshape(shape),
+        n_active=(acts > 0).sum(axis=-1).reshape(shape).astype(np.int32),
+    )

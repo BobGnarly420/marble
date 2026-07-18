@@ -80,6 +80,8 @@ from trajectory import extract, densify    # Trajectory list, animation path
 from metrics import summarize              # research metrics
 from compare import compare                # A/B trajectory comparison
 from sae import demo_sae, feature_trajectory  # SAE feature activations
+from sae import feature_field                 # SAE over the projection plane
+from attractor import analyze, explain        # why the basin forms, in prose
 from ui import run_pipeline, render        # everything at once → plotly Figure
 from ui import run_scene, run_intervention  # multi-prompt scenes, patching
 
@@ -139,6 +141,7 @@ density, terrain, metrics, comparison, every viewer) works unchanged.
 | `terrain.py` | Density → smoothed height map → mesh; drapes trajectories on it |
 | `trajectory.py` | `StateTrajectory`, extraction modes (token / all / mean / CLS), spline densify |
 | `metrics.py` | Entropy, KL, path length, curvature, velocity, drift, NN-stability |
+| `attractor.py` | Why the basin forms and what it is made of: deceleration, membership, readout stability → measured prose (`explain`) |
 | `cache.py` | Disk cache keyed by prompt + config hash |
 | `config.py` | One dataclass for every pipeline knob |
 | `ui.py` | Pure pipeline + pure Plotly renderer + Streamlit shell |
@@ -242,6 +245,63 @@ the selected feature's activation per layer, the inspector lists the top
 features at the selected state, and a **Residual decomposition** panel shows
 each block's attention/MLP share.
 
+### Why the attractor: the explanatory layer
+
+The terrain is a density field over the run's own projected states, so a
+basin is a *pile-up*, not scenery — and `attractor.py` measures the
+mechanism instead of leaving it implicit. `analyze(traj, coords, landscape)`
+returns a `BasinReport`: the tracked token's per-layer step (it peaks early
+and shrinks late — the settling that causes the pile-up), the basin's
+membership roster (which (layer, token) states sit above a density
+threshold), the layer from which the logit-lens top-1 stops changing,
+entropy collapse, and the attention/MLP share of the settled writes.
+`explain(report, traj)` turns one report into prose in which every sentence
+is generated from a measurement — nothing is canned lore.
+
+In the explorer this runs by default: the scene pins a callout to the
+density peak (member count, layer range, settle layer, stabilized top-1),
+and the **Why this attractor** inspector panel carries the full explanation
+with the step and entropy profiles. "Attractor" stays descriptive geometry
+— where this run's states accumulate — not a dynamical-systems claim.
+
+```python
+from attractor import analyze, explain
+
+report = analyze(traj, coords, landscape)       # BasinReport
+print(report.settle_layer, report.n_members, report.top_token)
+print(explain(report, traj))                    # measured prose
+```
+
+### The SAE feature field: domain coloring for the latent manifold
+
+The complex-plane plots that make f(z) visible — hue for arg(f), brightness
+for |f|, rings at magnitude octaves — have a direct analogue here: the
+projection plane is the domain, and the SAE dictionary is the function.
+`sae.feature_field(sae, projector, grid_x, grid_y)` inverse-projects every
+grid point back to hidden space (exact for PCA — the grid lands on the
+fitted 2-plane, so the field shows what the SAE sees *along the plane you
+are looking at*) and encodes it, recording the dominant feature and its
+activation per point.
+
+`ui.render_feature_field` renders it two ways: **plane** — flat domain
+coloring (hue = dominant feature, the "phase"; brightness = activation, the
+"modulus"; sawtooth rings at magnitude octaves) with the run's trajectory
+drawn crossing feature domains — and **relief**, which lifts activation
+into z and leaves holes where no feature fires. In the explorer, tick
+**SAE feature field (domain coloring)**. As everywhere in `sae.py`, the
+demo dictionary makes the machinery run offline; load real weights with
+`sae.load_npz` for interpretable domains.
+
+```python
+from sae import demo_sae, feature_field
+from ui import render_feature_field
+
+sae = demo_sae(traj.dim)
+land = result["landscape"]
+field = feature_field(sae, result["projector"], land.grid_x, land.grid_y)
+render_feature_field(field, sae, path=result["coords"][:, -1, :2]).show()
+```
+
 ### Multi-prompt scenes, attention flow, interactive patching
 
 `ui.run_scene(cfg, prompts)` generalizes the A/B overlay to N prompts: every
@@ -327,6 +387,13 @@ The tokens live in three mirrored places: `ui.py` (`_MARBLE_COLORS`,
 `_TERRAIN_COLORSCALE`), `.streamlit/config.toml`, and `viewer/style.css` —
 change a value in all three to retheme.
 
+The design language is also expected to *explain*, not just style: the
+scene carries a measured callout at the density peak, captions state what
+the terrain is made of, and the inspector's "Why this attractor" panel is
+prose generated from this run's numbers (`attractor.explain`). The rule:
+if the visualization invites a question ("why is that basin there?"), a
+surface owes the measured answer.
+
 ### Plugin points
 
 Projections (`projection.PROJECTIONS`), density estimators
@@ -380,6 +447,11 @@ research tool.
 - **Distribution** — ✅ pip-installable package with a `mottled` CLI, browser
   capture backend (`serve.py`), Mamba producer, real GPT-2 sample scene,
   GitHub Pages site (landing + viewer).
+- **Explanatory layer** — ✅ attractor analysis (`attractor.py`): why the
+  basin forms and what it is made of, as measured prose, pinned callouts,
+  and inspector panels; SAE feature field (`sae.feature_field`) — domain
+  coloring of the projection plane, plane and relief views.
 - **Next** — desktop shell, volumetric field rendering for ensembles, SAE
-  feature flows across layers, richer scene management (pin/hide runs,
-  saved scenes), diffusion / recording producers.
+  feature flows across layers, feature field in the web viewer, richer
+  scene management (pin/hide runs, saved scenes), diffusion / recording
+  producers.

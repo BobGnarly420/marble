@@ -47,6 +47,17 @@ class PCAProjection:
     def transform(self, X: np.ndarray) -> np.ndarray:
         return self._pca.transform(np.asarray(X, dtype=np.float64)).astype(np.float32)
 
+    def inverse_transform(self, Y: np.ndarray) -> np.ndarray:
+        """(N, n_components) plane coordinates -> (N, D) hidden vectors.
+
+        Exact for PCA: the returned vectors lie on the fitted affine
+        subspace, so `transform(inverse_transform(Y)) == Y`.  This is what
+        lets a field be evaluated over the projection plane itself (see
+        `sae.feature_field`).
+        """
+        return self._pca.inverse_transform(
+            np.asarray(Y, dtype=np.float64)).astype(np.float32)
+
 
 @register_projection("umap")
 class UMAPProjection:
@@ -68,6 +79,12 @@ class UMAPProjection:
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         return np.asarray(self._umap.transform(np.asarray(X, dtype=np.float32)), dtype=np.float32)
+
+    def inverse_transform(self, Y: np.ndarray) -> np.ndarray:
+        """Approximate embedding-space -> data-space inverse (umap's own)."""
+        return np.asarray(
+            self._umap.inverse_transform(np.asarray(Y, dtype=np.float32)),
+            dtype=np.float32)
 
 
 def project(

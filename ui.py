@@ -14,6 +14,7 @@ from dataclasses import replace
 import numpy as np
 import plotly.graph_objects as go
 
+import attractor as attractor_mod
 import cache as cache_mod
 import compare as compare_mod
 import density as density_mod
@@ -46,7 +47,7 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None) -> 
     omitted, `cfg.model` is loaded by name ("synthetic" needs no loading).
     """
     disk = cache_mod.DiskCache(cfg.cache_dir) if cfg.use_cache else None
-    key = cache_mod.make_key("pipeline-v3", prompt, cfg.model, cfg.projection,
+    key = cache_mod.make_key("pipeline-v4", prompt, cfg.model, cfg.projection,
                              cfg.density, cfg.top_k, cfg.n_components, cfg.seed,
                              cfg.grid_size, cfg.smooth_sigma, cfg.height_scale,
                              cfg.invert_terrain, cfg.trajectory_mode,
@@ -57,7 +58,7 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None) -> 
 
     traj = _capture_with(cfg, prompt, model=model, tokenizer=tokenizer)
 
-    coords, _ = projection_mod.project(
+    coords, projector = projection_mod.project(
         traj.hidden, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed
     )
     landscape = density_mod.compute_density(
@@ -80,6 +81,7 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None) -> 
         "prompt": prompt,
         "traj": traj,
         "coords": coords,
+        "projector": projector,
         "landscape": landscape,
         "mesh": surface,
         "trajectories": trajectories,
@@ -110,7 +112,7 @@ def _capture_with(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None) ->
 def _assemble_scene(cfg: MarbleConfig, trajs: list[StateTrajectory]) -> dict:
     """Shared multi-run assembly: joint projection, one terrain from the
     union of all runs' states, draped trajectories, comparisons vs run 0."""
-    coords_list, _ = projection_mod.project_joint(
+    coords_list, projector = projection_mod.project_joint(
         [t.hidden for t in trajs],
         method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed,
     )
@@ -143,6 +145,7 @@ def _assemble_scene(cfg: MarbleConfig, trajs: list[StateTrajectory]) -> dict:
     result = {
         "trajs": trajs,
         "coords_list": coords_list,
+        "projector": projector,
         "landscape": landscape,
         "mesh": surface,
         "trajectories_list": trajectories_list,
@@ -177,7 +180,7 @@ def run_scene(cfg: MarbleConfig, prompts: list[str], model=None, tokenizer=None)
     if not prompts:
         raise ValueError("run_scene needs at least one prompt")
     disk = cache_mod.DiskCache(cfg.cache_dir) if cfg.use_cache else None
-    key = cache_mod.make_key("scene-v1", prompts, cfg.model, cfg.projection,
+    key = cache_mod.make_key("scene-v2", prompts, cfg.model, cfg.projection,
                              cfg.density, cfg.top_k, cfg.n_components, cfg.seed,
                              cfg.grid_size, cfg.smooth_sigma, cfg.height_scale,
                              cfg.invert_terrain, cfg.trajectory_mode,
@@ -305,6 +308,7 @@ def render(
     overlay: list[np.ndarray] | None = None,
     overlay_label: str = "feature",
     show_attention: bool = False,
+    basin: attractor_mod.BasinReport | None = None,
 ) -> go.Figure:
     """Build the 3-D scene: terrain surface, token trajectories, animated marbles.
 
@@ -319,6 +323,11 @@ def render(
     on a shared color scale with a colorbar.  `show_attention` draws the
     primary run's attention flow at `current_layer` (per-token trajectories
     with a captured attention pattern only).
+
+    `basin` (an `attractor.analyze` report) marks the density peak and pins
+    a measured explanation to it — membership count, layer range, settle
+    layer, stabilized readout — so the scene says *why* the basin is there,
+    not just that it is.
     """
     fig = go.Figure()
     fig.add_trace(go.Surface(
@@ -373,6 +382,32 @@ def render(
         att = _attention_trace(trajectories, traj.attention, current_layer)
         if att is not None:
             fig.add_trace(att)
+
+    basin_annotations = []
+    if basin is not None:
+        cx, cy = float(basin.center[0]), float(basin.center[1])
+        cz = float(terrain_mod.surface_height(surface, np.array([[cx, cy]]))[0])
+        lines = [f"attractor basin · {basin.n_members}/{basin.n_states} states"
+                 f" · layers {basin.layer_range[0]}–{basin.layer_range[1]}"]
+        if basin.settle_layer is not None:
+            lines.append(f"settles at layer {basin.settle_layer}")
+        if basin.top_token is not None and basin.readout_stable_from is not None:
+            lines.append(f"top-1 {basin.top_token!r} from layer {basin.readout_stable_from}")
+        fig.add_trace(go.Scatter3d(
+            x=[cx], y=[cy], z=[cz + 0.03], mode="markers",
+            marker={"size": 9, "symbol": "diamond-open", "color": "#C8D4FB",
+                    "line": {"color": "#4B7CF3", "width": 3}},
+            name="attractor", hoverinfo="text", text=["<br>".join(lines)],
+        ))
+        basin_annotations = [{
+            "x": cx, "y": cy, "z": cz + 0.05,
+            "text": "<br>".join(lines),
+            "font": {"family": _FONT_MONO, "size": 10, "color": "#C8D4FB"},
+            "bgcolor": "rgba(12,16,32,0.88)", "bordercolor": "#1E2540",
+            "borderwidth": 1, "borderpad": 6,
+            "arrowcolor": "#4B7CF3", "arrowwidth": 1.5,
+            "ax": 60, "ay": -70, "xanchor": "left", "align": "left",
+        }]
 
     # Marbles: one animated marker per trajectory, positioned along the
     # densified path; fine index f corresponds to layer f / frames_per_layer.
@@ -450,6 +485,7 @@ def render(
             "zaxis": {"title": "potential", **axis},
             "aspectmode": "manual",
             "aspectratio": {"x": sx / m, "y": sy / m, "z": max(sz / m, 0.12)},
+            "annotations": basin_annotations,
         },
         margin={"l": 0, "r": 0, "t": 24, "b": 0},
         height=680,
@@ -462,6 +498,130 @@ def render(
                     "font": {"family": _FONT_MONO, "color": "#EDF0FA", "size": 11}},
         title={"text": "Mottled — latent trajectory explorer",
                "font": {"size": 13, "color": "#818FB8"}},
+    )
+    return fig
+
+
+# --------------------------------------------------------------------------
+# SAE feature field — domain coloring of the projection plane.
+# --------------------------------------------------------------------------
+_GOLDEN = 0.6180339887498949  # golden-ratio conjugate: well-spread hues
+
+
+def _feature_hue(ids: np.ndarray) -> np.ndarray:
+    """Stable, well-separated hue in [0, 1) per feature id."""
+    return (np.asarray(ids, dtype=np.float64) * _GOLDEN) % 1.0
+
+
+def _hsv_to_rgb(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Vectorized HSV -> RGB, all components in [0, 1]; returns (..., 3)."""
+    h6 = (np.asarray(h, dtype=np.float64) % 1.0) * 6.0
+    i = np.floor(h6).astype(int) % 6
+    f = h6 - np.floor(h6)
+    s, v = np.broadcast_to(s, i.shape), np.broadcast_to(v, i.shape)
+    p, q, t = v * (1 - s), v * (1 - s * f), v * (1 - s * (1 - f))
+    r = np.choose(i, [v, q, p, p, t, v])
+    g = np.choose(i, [t, v, v, q, p, p])
+    b = np.choose(i, [p, p, t, v, v, q])
+    return np.stack([r, g, b], axis=-1)
+
+
+def field_rgb(field: sae_mod.FeatureField) -> np.ndarray:
+    """Domain-color a feature field: (H, W, 3) uint8.
+
+    The classical complex-plane recipe, transplanted: hue encodes the
+    dominant feature (the "phase" — which dictionary direction this point
+    of the manifold decodes into), brightness encodes its activation (the
+    "modulus"), and the sawtooth banding on log2(magnitude) draws the
+    contour rings at magnitude octaves.  Points where no feature fires
+    render as the void.
+    """
+    fires = field.dominant >= 0
+    m = field.magnitude / max(float(field.magnitude.max()), 1e-12)
+    hue = _feature_hue(np.maximum(field.dominant, 0))
+    sat = np.where(fires, 0.62, 0.0)
+    with np.errstate(divide="ignore"):
+        octave = np.log2(np.maximum(m, 1e-9))
+    band = 0.82 + 0.18 * (octave - np.floor(octave))
+    val = np.where(fires, (0.18 + 0.82 * np.sqrt(m)) * band, 0.035)
+    return (np.clip(_hsv_to_rgb(hue, sat, val), 0.0, 1.0) * 255).astype(np.uint8)
+
+
+def render_feature_field(
+    field: sae_mod.FeatureField,
+    sae: sae_mod.SAE | None = None,
+    path: np.ndarray | None = None,
+    relief: bool = False,
+) -> go.Figure:
+    """The SAE feature field as a domain-colored figure.
+
+    `path` (L, 2) overlays a projected trajectory so the run's route through
+    feature territory is visible.  `relief=False` is the flat complex-plane
+    view; `relief=True` lifts activation magnitude into z, leaving holes
+    where no feature fires — the manifold sheets of the dictionary.
+    """
+    fig = go.Figure()
+    if relief:
+        m = field.magnitude / max(float(field.magnitude.max()), 1e-12)
+        z = np.where(field.dominant >= 0, m, np.nan)
+        hue_scale = [[i / 12, "rgb({:.0f},{:.0f},{:.0f})".format(
+            *(255 * _hsv_to_rgb(np.array(i / 12), 0.62, 0.9)))] for i in range(13)]
+        fig.add_trace(go.Surface(
+            x=field.grid_x, y=field.grid_y, z=z,
+            surfacecolor=_feature_hue(np.maximum(field.dominant, 0)),
+            colorscale=hue_scale, cmin=0.0, cmax=1.0, showscale=False,
+            opacity=0.96, name="feature field", hoverinfo="skip",
+        ))
+        if path is not None:
+            p = np.asarray(path, dtype=np.float64)[:, :2]
+            top = float(np.nanmax(z)) if np.isfinite(z).any() else 1.0
+            fig.add_trace(go.Scatter3d(
+                x=p[:, 0], y=p[:, 1], z=np.full(len(p), top + 0.06),
+                mode="lines+markers", name="trajectory",
+                line={"color": "#EDF0FA", "width": 4}, marker={"size": 3, "color": "#EDF0FA"},
+            ))
+        axis = {"showbackground": False, "gridcolor": "#1E2540",
+                "zerolinecolor": "#283050", "color": "#818FB8"}
+        fig.update_layout(scene={
+            "xaxis": {"title": "manifold x", **axis},
+            "yaxis": {"title": "manifold y", **axis},
+            "zaxis": {"title": "activation", **axis},
+        })
+    else:
+        dx = float(field.grid_x[1] - field.grid_x[0]) if len(field.grid_x) > 1 else 1.0
+        dy = float(field.grid_y[1] - field.grid_y[0]) if len(field.grid_y) > 1 else 1.0
+        fig.add_trace(go.Image(
+            z=field_rgb(field),
+            x0=float(field.grid_x[0]), dx=dx,
+            y0=float(field.grid_y[0]), dy=dy,
+            hoverinfo="skip", name="feature field",
+        ))
+        if path is not None:
+            p = np.asarray(path, dtype=np.float64)[:, :2]
+            fig.add_trace(go.Scatter(
+                x=p[:, 0], y=p[:, 1], mode="lines+markers", name="trajectory",
+                line={"color": "#EDF0FA", "width": 2},
+                marker={"size": 5, "color": "#EDF0FA",
+                        "line": {"color": "#080B18", "width": 1}},
+                text=[f"layer {l}" for l in range(len(p))], hoverinfo="text",
+            ))
+        fig.update_xaxes(title="manifold x", gridcolor="#1E2540", color="#818FB8",
+                         zeroline=False, constrain="domain")
+        fig.update_yaxes(title="manifold y", gridcolor="#1E2540", color="#818FB8",
+                         zeroline=False, autorange=True, scaleanchor="x")
+    n_domains = len(field.features)
+    fig.update_layout(
+        margin={"l": 0, "r": 0, "t": 28, "b": 0},
+        height=560,
+        paper_bgcolor="#080B18", plot_bgcolor="#080B18",
+        font={"family": _FONT_SANS, "color": "#EDF0FA", "size": 12},
+        showlegend=False,
+        hoverlabel={"bgcolor": "#161C33", "bordercolor": "#283050",
+                    "font": {"family": _FONT_MONO, "color": "#EDF0FA", "size": 11}},
+        title={"text": f"SAE feature field — {n_domains} feature domains · "
+                       "hue = dominant feature, brightness = activation, "
+                       "rings = magnitude octaves",
+               "font": {"size": 12, "color": "#818FB8"}},
     )
     return fig
 
@@ -522,6 +682,14 @@ def main() -> None:
                              help="Color trajectory markers by one feature's activation. "
                                   "Uses an untrained demo dictionary; load real weights "
                                   "with sae.load_npz for interpretable features.")
+        field_on = st.checkbox("SAE feature field (domain coloring)", value=False,
+                               key="sae_field",
+                               help="Wolfram-style domain coloring of the projection "
+                                    "plane: every point is inverse-projected to hidden "
+                                    "space and run through the SAE — hue = dominant "
+                                    "feature, brightness = activation, rings = "
+                                    "magnitude octaves. Needs an invertible "
+                                    "projection (pca).")
         attention_on = st.checkbox("Show attention flow", value=False, key="attention_flow",
                                    help="Draw head-averaged attention edges between token "
                                         "states at the selected layer.")
@@ -638,6 +806,8 @@ def main() -> None:
             for i in range(2, len(result["trajs"]))
         ]
 
+    basin = attractor_mod.analyze(traj, result["coords"], result["landscape"])
+
     with col_viz:
         fig = render(traj, result["mesh"], result["trajectories"], result["fine_paths"],
                      current_layer=layer, frames_per_layer=cfg.frames_per_layer,
@@ -647,8 +817,46 @@ def main() -> None:
                      fine_paths_b=result.get("fine_paths_b"),
                      extra_runs=extra_runs,
                      overlay=overlay, overlay_label=overlay_label,
-                     show_attention=attention_on)
+                     show_attention=attention_on,
+                     basin=basin)
         st.plotly_chart(fig, use_container_width=True, key="scene")
+        st.caption('The terrain is a density field over the projected states '
+                   'themselves — height means "many states landed here", not an '
+                   'external landscape. The pinned callout marks the basin; open '
+                   '**Why this attractor** in the inspector for this run\'s numbers.')
+
+        if field_on:
+            projector = result.get("projector")
+            if projector is None or not hasattr(projector, "inverse_transform"):
+                st.caption("The feature field needs an invertible projection — "
+                           "re-run with projection = pca.")
+            else:
+                field_sae = _demo_sae(traj.dim, cfg.sae_features)
+                landscape = result["landscape"]
+                try:
+                    fld = sae_mod.feature_field(field_sae, projector,
+                                                landscape.grid_x, landscape.grid_y)
+                except Exception as err:  # e.g. umap's approximate inverse failing
+                    st.caption(f"feature field unavailable: {err}")
+                else:
+                    relief = st.radio("Field view", ["plane", "relief"],
+                                      horizontal=True, key="field_mode") == "relief"
+                    tok_idx = cfg.trajectory_token % traj.n_tokens
+                    st.plotly_chart(
+                        render_feature_field(fld, field_sae,
+                                             path=result["coords"][:, tok_idx, :2],
+                                             relief=relief),
+                        use_container_width=True, key="field")
+                    st.caption('Domain coloring of the projection plane — the '
+                               'complex-plane analogue for the latent manifold: every '
+                               'point of the plane is inverse-projected to hidden '
+                               'space and run through the SAE. Hue = which feature '
+                               'decodes strongest there (the "phase"), brightness = '
+                               'its activation (the "modulus"), rings = magnitude '
+                               'octaves; the white path is this run\'s tracked-token '
+                               'trajectory crossing feature domains. Demo dictionary — '
+                               'load real weights with sae.load_npz for interpretable '
+                               'domains.')
 
     # ----------------------------------------------------------- right panel
     with col_info:
@@ -697,6 +905,18 @@ def main() -> None:
                 shares = metrics_mod.component_shares(traj, token=token)
                 st.markdown("Share of each block's residual write")
                 st.line_chart({"attention": shares[:, 0], "mlp": shares[:, 1]})
+
+        with st.expander("Why this attractor", expanded=False):
+            report = (basin if basin.token == token % traj.n_tokens else
+                      attractor_mod.analyze(traj, result["coords"],
+                                            result["landscape"], token=token))
+            st.markdown(attractor_mod.explain(report, traj))
+            if len(report.step):
+                st.markdown("**Per-layer step of this token** *(hidden space)*")
+                st.line_chart({"step": report.step})
+            if report.entropy is not None:
+                st.markdown("**Predictive entropy per layer** *(nats)*")
+                st.line_chart({"entropy": report.entropy})
 
         with st.expander("Research metrics", expanded=False):
             summary = metrics_mod.summarize(traj, result["coords"], token=token)
