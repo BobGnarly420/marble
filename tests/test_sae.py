@@ -90,6 +90,133 @@ def test_top_and_active_features():
     assert 0 not in ranked and 3 not in ranked  # silent features excluded
 
 
+# ---------------------------------------------------------- feature field
+def test_pca_inverse_transform_roundtrip():
+    from projection import project
+
+    traj = synthetic.capture(PROMPT)
+    coords, proj = project(traj.hidden)
+    flat = coords.reshape(-1, 2)
+    assert np.allclose(proj.transform(proj.inverse_transform(flat)), flat, atol=1e-4)
+
+
+def test_feature_field_shapes_and_determinism():
+    from projection import project
+
+    traj = synthetic.capture(PROMPT)
+    coords, proj = project(traj.hidden)
+    sae = S.demo_sae(traj.dim, n_features=64)
+    gx = np.linspace(coords[..., 0].min(), coords[..., 0].max(), 24)
+    gy = np.linspace(coords[..., 1].min(), coords[..., 1].max(), 16)
+    fld = S.feature_field(sae, proj, gx, gy)
+    assert fld.magnitude.shape == fld.dominant.shape == fld.n_active.shape == (16, 24)
+    assert np.isfinite(fld.magnitude).all() and (fld.magnitude >= 0).all()
+    assert fld.dominant.min() >= -1 and fld.dominant.max() < 64
+    assert ((fld.dominant == -1) == (fld.magnitude <= 0)).all()
+    assert (fld.n_active >= (fld.magnitude > 0)).all()
+    assert set(fld.features) == set(np.unique(fld.dominant[fld.dominant >= 0]))
+    assert len(fld.features) > 1  # a field, not a single domain
+    again = S.feature_field(sae, proj, gx, gy)
+    assert np.array_equal(fld.dominant, again.dominant)
+    assert np.array_equal(fld.magnitude, again.magnitude)
+
+
+@pytest.mark.skipif("umap" not in __import__("projection").PROJECTIONS, reason="umap not registered")
+def test_feature_field_with_umap_inverse_is_approximate_but_shape_safe():
+    """umap's inverse_transform is an optimization-based approximation, not
+    an exact map — the field must still come back finite and correctly
+    shaped, even though the values away from the fitted data are not to be
+    trusted as measurement (see the UI caption)."""
+    pytest.importorskip("umap")
+    from projection import project
+
+    traj = synthetic.capture(PROMPT)
+    coords, proj = project(traj.hidden, method="umap")
+    sae = S.demo_sae(traj.dim, n_features=32)
+    gx = np.linspace(coords[..., 0].min(), coords[..., 0].max(), 12)
+    gy = np.linspace(coords[..., 1].min(), coords[..., 1].max(), 10)
+    fld = S.feature_field(sae, proj, gx, gy)
+    assert fld.magnitude.shape == (10, 12)
+    assert np.isfinite(fld.magnitude).all()
+    assert fld.dominant.min() >= -1
+
+
+def test_feature_field_requires_an_invertible_projection():
+    traj = synthetic.capture(PROMPT)
+    sae = S.demo_sae(traj.dim, 16)
+
+    class NoInverse:
+        pass
+
+    with pytest.raises(ValueError, match="inverse"):
+        S.feature_field(sae, NoInverse(), np.zeros(4), np.zeros(4))
+
+    class WrongDim:
+        def inverse_transform(self, Y):
+            return np.zeros((len(Y), traj.dim + 1), np.float32)
+
+    with pytest.raises(ValueError, match="dim"):
+        S.feature_field(sae, WrongDim(), np.zeros(4), np.zeros(4))
+
+
+def test_field_rgb_domain_coloring():
+    from ui import field_rgb
+
+    fld = S.FeatureField(
+        grid_x=np.array([0.0, 1.0], np.float32),
+        grid_y=np.array([0.0, 1.0], np.float32),
+        magnitude=np.array([[0.0, 1.0], [0.5, 2.0]], np.float32),
+        dominant=np.array([[-1, 3], [5, 3]], np.int32),
+        n_active=np.array([[0, 2], [1, 3]], np.int32),
+    )
+    rgb = field_rgb(fld)
+    assert rgb.dtype == np.uint8 and rgb.shape == (2, 2, 3)
+    dead = rgb[0, 0]
+    assert dead[0] == dead[1] == dead[2] and dead[0] < 20  # achromatic void
+    assert not np.array_equal(rgb[0, 1], rgb[1, 0])  # different features, different hue
+    assert rgb[1, 1].max() > dead.max()  # firing cells outshine the void
+
+
+def test_render_feature_field_modes():
+    from config import MarbleConfig
+    from ui import render_feature_field, run_pipeline
+
+    cfg = MarbleConfig(model="synthetic", use_cache=False)
+    result = run_pipeline(cfg, PROMPT)
+    traj = result["traj"]
+    assert hasattr(result["projector"], "inverse_transform")
+    sae = S.demo_sae(traj.dim, 64)
+    land = result["landscape"]
+    fld = S.feature_field(sae, result["projector"], land.grid_x, land.grid_y)
+    path = result["coords"][:, -1, :2]
+
+    flat = render_feature_field(fld, sae, path=path)
+    assert flat.data[0].type == "image"
+    assert np.asarray(flat.data[0].z).shape == (len(land.grid_y), len(land.grid_x), 3)
+    assert flat.data[1].type == "scatter" and len(flat.data[1].x) == traj.n_layers
+
+    relief = render_feature_field(fld, sae, path=path, relief=True)
+    assert relief.data[0].type == "surface"
+    assert relief.data[1].type == "scatter3d"
+
+
+def test_streamlit_app_feature_field():
+    """Drive the real app with the domain-coloring field enabled."""
+    AppTest = pytest.importorskip("streamlit.testing.v1").AppTest
+
+    at = AppTest.from_file("ui.py", default_timeout=120)
+    at.run()
+    at.text_area(key="prompt").set_value(PROMPT)
+    at.selectbox(key="model").select("synthetic")
+    at.checkbox(key="sae_field").check()
+    at.button(key="run").click()
+    at.run()
+    assert not at.exception
+    at.radio(key="field_mode").set_value("relief")
+    at.run()
+    assert not at.exception
+
+
 # ----------------------------------------------- residual decomposition
 def test_synthetic_components_sum_to_updates():
     traj = synthetic.capture(PROMPT, capture_components=True)

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Explanatory layer
+- `attractor.py`: measures why the density basin forms (per-layer step
+  deceleration, settle layer), what it is made of (membership roster above
+  a density threshold), and what it means (readout stabilization, entropy
+  collapse, attn/MLP share of the settled writes). `explain` turns a
+  report into prose generated entirely from the measurements.
+- The explorer pins a measured callout to the density peak, captions the
+  terrain as a density field over the states themselves, and adds a
+  "Why this attractor" inspector panel with step and entropy profiles.
+
+### SAE feature field (domain coloring)
+- `projection`: PCA (exact) and UMAP (approximate) gain
+  `inverse_transform` — plane coordinates back to hidden space.
+- `sae.feature_field`: the SAE evaluated over the projection plane — the
+  complex-plane domain-coloring analogue, with the dominant feature as the
+  phase and its activation as the modulus.
+- `ui.render_feature_field`: flat domain-coloring view (golden-angle hues,
+  magnitude-octave rings, trajectory overlay) and a relief view lifting
+  activation into z; new "SAE feature field" toggle in the explorer.
+- Pipeline results now carry the fitted `projector` (cache keys bumped).
+
 ## 0.1.0 — 2026-07-14
 
 First versioned release. Everything below landed since the MVP.
