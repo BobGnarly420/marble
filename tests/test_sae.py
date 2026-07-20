@@ -121,6 +121,26 @@ def test_feature_field_shapes_and_determinism():
     assert np.array_equal(fld.magnitude, again.magnitude)
 
 
+@pytest.mark.skipif("umap" not in __import__("projection").PROJECTIONS, reason="umap not registered")
+def test_feature_field_with_umap_inverse_is_approximate_but_shape_safe():
+    """umap's inverse_transform is an optimization-based approximation, not
+    an exact map — the field must still come back finite and correctly
+    shaped, even though the values away from the fitted data are not to be
+    trusted as measurement (see the UI caption)."""
+    pytest.importorskip("umap")
+    from projection import project
+
+    traj = synthetic.capture(PROMPT)
+    coords, proj = project(traj.hidden, method="umap")
+    sae = S.demo_sae(traj.dim, n_features=32)
+    gx = np.linspace(coords[..., 0].min(), coords[..., 0].max(), 12)
+    gy = np.linspace(coords[..., 1].min(), coords[..., 1].max(), 10)
+    fld = S.feature_field(sae, proj, gx, gy)
+    assert fld.magnitude.shape == (10, 12)
+    assert np.isfinite(fld.magnitude).all()
+    assert fld.dominant.min() >= -1
+
+
 def test_feature_field_requires_an_invertible_projection():
     traj = synthetic.capture(PROMPT)
     sae = S.demo_sae(traj.dim, 16)

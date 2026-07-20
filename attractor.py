@@ -44,7 +44,7 @@ class BasinReport:
     members: np.ndarray               # (M, 2) int (layer, token) states in the basin
     member_share: float               # M / n_states
     member_threshold: float           # density cut as a fraction of the peak
-    layer_range: tuple[int, int]      # first / last member layer
+    layer_range: tuple[int, int] | None  # first / last member layer; None if no members
     late_share: float                 # fraction of members from the last half of layers
     step: np.ndarray                  # (L-1,) tracked token's hidden-space step per layer
     peak_step_layer: int              # layer receiving the largest step
@@ -95,7 +95,7 @@ def analyze(
     dens = density_at(landscape, pts.reshape(-1, 2)).reshape(L, T)
     members = np.argwhere(dens >= member_threshold * max(dens.max(), 1e-12))
     layers = members[:, 0]
-    layer_range = (int(layers.min()), int(layers.max())) if len(layers) else (0, 0)
+    layer_range = (int(layers.min()), int(layers.max())) if len(layers) else None
     late_share = float((layers >= L / 2).mean()) if len(layers) else 0.0
 
     peak = np.unravel_index(np.argmax(landscape.density), landscape.density.shape)
@@ -126,8 +126,9 @@ def analyze(
     late_attn_share = None
     if traj.components is not None and {"attn", "mlp"} <= set(traj.components):
         shares = metrics_mod.component_shares(traj, token=token)
-        start = min(settle_layer if settle_layer is not None else L // 2, len(shares) - 1)
-        late_attn_share = float(shares[start:, 0].mean())
+        if len(shares):  # empty for single-layer trajectories (no block writes)
+            start = min(settle_layer if settle_layer is not None else L // 2, len(shares) - 1)
+            late_attn_share = float(shares[start:, 0].mean())
 
     return BasinReport(
         token=token,
@@ -166,29 +167,45 @@ def explain(report: BasinReport, traj: StateTrajectory) -> str:
     step = report.step
     if len(step):
         drop = 1.0 - step[-1] / max(step.max(), 1e-12)
-        why = (
-            f"**Why the basin forms** — the residual stream decelerates. "
-            f"Token `{tok}`'s per-layer step peaks at "
-            f"**{step.max():.2f}** (into layer {report.peak_step_layer}) and "
-            f"ends at **{step[-1]:.2f}** ({drop:.0%} smaller)."
-        )
         if report.settle_layer is not None:
-            why += f" From layer **{report.settle_layer}** the state barely moves."
-        why += (
-            " Small steps mean consecutive layers deposit near-identical "
-            "states in one neighborhood, and the density estimator raises a "
-            "peak there: the attractor is the pile-up of a trajectory that "
-            "has stopped travelling."
-        )
+            why = (
+                f"**Why the basin forms** — token `{tok}`'s per-layer step "
+                f"decelerates: it peaks at **{step.max():.2f}** (into layer "
+                f"{report.peak_step_layer}) and drops to **{step[-1]:.2f}** "
+                f"({drop:.0%} smaller); from layer **{report.settle_layer}** "
+                f"it barely moves. Small steps mean consecutive layers deposit "
+                f"near-identical states in one neighborhood, and the density "
+                f"estimator raises a peak there — for this token, the pile-up "
+                f"is a trajectory that has stopped travelling."
+            )
+        else:
+            why = (
+                f"**This token isn't what settles here** — `{tok}`'s per-layer "
+                f"step peaks at **{step.max():.2f}** (into layer "
+                f"{report.peak_step_layer}) and is still **{step[-1]:.2f}** at "
+                f"the last layer ({drop:.0%} off peak, never small enough to "
+                f"call settled). Whatever basin exists below is built from "
+                f"*other* states in this run piling up in that neighborhood — "
+                f"this token's own trajectory is passing through it, not "
+                f"resting in it."
+            )
         parts.append(why)
 
-    a, b = report.layer_range
-    parts.append(
-        f"**What it is made of** — **{report.n_members} of {report.n_states}** "
-        f"states sit above {report.member_threshold:.0%} of peak density: "
-        f"layers {a}–{b}, with {report.late_share:.0%} of members from the "
-        f"second half of the stack."
-    )
+    if report.n_members == 0:
+        parts.append(
+            f"**What it is made of** — no state in this run reaches "
+            f"{report.member_threshold:.0%} of peak density: at this "
+            f"threshold there is no basin to describe."
+        )
+    else:
+        a, b = report.layer_range
+        parts.append(
+            f"**What it is made of** — **{report.n_members} of {report.n_states}** "
+            f"states (across every token in the run, not just `{tok}`) sit above "
+            f"{report.member_threshold:.0%} of peak density: layers {a}–{b}, "
+            f"with {report.late_share:.0%} of members from the second half of "
+            f"the stack."
+        )
 
     meaning = []
     if report.top_token is not None and report.readout_stable_from is not None:

@@ -387,8 +387,9 @@ def render(
     if basin is not None:
         cx, cy = float(basin.center[0]), float(basin.center[1])
         cz = float(terrain_mod.surface_height(surface, np.array([[cx, cy]]))[0])
-        lines = [f"attractor basin · {basin.n_members}/{basin.n_states} states"
-                 f" · layers {basin.layer_range[0]}–{basin.layer_range[1]}"]
+        span = (f"layers {basin.layer_range[0]}–{basin.layer_range[1]}"
+                if basin.layer_range is not None else "no states above threshold")
+        lines = [f"attractor basin · {basin.n_members}/{basin.n_states} states · {span}"]
         if basin.settle_layer is not None:
             lines.append(f"settles at layer {basin.settle_layer}")
         if basin.top_token is not None and basin.readout_stable_from is not None:
@@ -688,8 +689,11 @@ def main() -> None:
                                     "plane: every point is inverse-projected to hidden "
                                     "space and run through the SAE — hue = dominant "
                                     "feature, brightness = activation, rings = "
-                                    "magnitude octaves. Needs an invertible "
-                                    "projection (pca).")
+                                    "magnitude octaves. Exact for pca; umap's inverse "
+                                    "is approximate and gets unreliable away from the "
+                                    "captured states (the field's grid always pads "
+                                    "20% past them), so treat those regions as "
+                                    "illustrative, not measured.")
         attention_on = st.checkbox("Show attention flow", value=False, key="attention_flow",
                                    help="Draw head-averaged attention edges between token "
                                         "states at the selected layer.")
@@ -831,6 +835,11 @@ def main() -> None:
                 st.caption("The feature field needs an invertible projection — "
                            "re-run with projection = pca.")
             else:
+                if cfg.projection != "pca":
+                    st.caption("Projection is umap: its inverse is approximate, so "
+                               "away from the actual captured states (the grid pads "
+                               "20% past them) the field can look confident while "
+                               "showing extrapolation artifacts, not measurement.")
                 field_sae = _demo_sae(traj.dim, cfg.sae_features)
                 landscape = result["landscape"]
                 try:

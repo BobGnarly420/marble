@@ -97,6 +97,45 @@ def test_density_at_matches_grid_nodes():
     assert A.density_at(landscape, far)[0] == 0.0
 
 
+def test_single_layer_trajectory_has_no_late_attn_share_nan():
+    """A one-layer run has no block writes to share between attn/MLP —
+    that must come back as None, never nan (empty-slice .mean() silently
+    gives nan and would leak into explain()'s prose as "nan% attention")."""
+    traj, coords, landscape = _pipeline(n_layers=1, capture_components=True)
+    r = A.analyze(traj, coords, landscape)
+    assert r.step.shape == (0,)
+    assert r.settle_layer is None
+    assert r.late_attn_share is None
+    assert "nan" not in A.explain(r, traj).lower()
+
+
+def test_zero_members_above_threshold_is_reported_as_absent_not_zero_zero():
+    """An unreachable threshold must not fall back to the (0, 0) sentinel
+    layer range, which would read as "the basin spans exactly layer 0"
+    instead of "there is no basin here"."""
+    traj, coords, landscape = _pipeline()
+    r = A.analyze(traj, coords, landscape, member_threshold=10.0)
+    assert r.n_members == 0
+    assert r.layer_range is None
+    text = A.explain(r, traj)
+    assert "no basin" in text or "no state" in text
+    assert "layers 0" not in text
+
+
+def test_explain_does_not_overclaim_deceleration_when_the_token_never_settles():
+    """If a token's step never drops below the settle threshold, explain()
+    must not still assert it "decelerates" / "has stopped travelling" — the
+    demo prompt's default token (settle_frac=0.25) never settles, so this
+    exercises the actual default path, not a contrived one."""
+    traj, coords, landscape = _pipeline()
+    r = A.analyze(traj, coords, landscape)
+    assert r.settle_layer is None  # the case this test targets
+    text = A.explain(r, traj)
+    assert "decelerates" not in text
+    assert "stopped travelling" not in text
+    assert "isn't what settles here" in text
+
+
 def test_render_pins_the_basin_annotation():
     from config import MarbleConfig
     from ui import render, run_pipeline

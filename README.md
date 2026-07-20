@@ -250,13 +250,16 @@ each block's attention/MLP share.
 The terrain is a density field over the run's own projected states, so a
 basin is a *pile-up*, not scenery — and `attractor.py` measures the
 mechanism instead of leaving it implicit. `analyze(traj, coords, landscape)`
-returns a `BasinReport`: the tracked token's per-layer step (it peaks early
-and shrinks late — the settling that causes the pile-up), the basin's
-membership roster (which (layer, token) states sit above a density
-threshold), the layer from which the logit-lens top-1 stops changing,
-entropy collapse, and the attention/MLP share of the settled writes.
-`explain(report, traj)` turns one report into prose in which every sentence
-is generated from a measurement — nothing is canned lore.
+returns a `BasinReport`: the tracked token's own per-layer step (when it
+decelerates and settles, versus when that token is simply passing through
+someone else's basin), the membership roster across *every* token in the
+run (which (layer, token) states sit above a density threshold — this is
+a whole-run fact, not caused by the one tracked token), the layer from
+which the logit-lens top-1 stops changing, entropy collapse, and the
+attention/MLP share of the settled writes. `explain(report, traj)` turns
+one report into prose in which every sentence is generated from a
+measurement — nothing is canned lore, and it says so plainly when a token
+*doesn't* settle rather than asserting deceleration that isn't there.
 
 In the explorer this runs by default: the scene pins a callout to the
 density peak (member count, layer range, settle layer, stabilized top-1),
